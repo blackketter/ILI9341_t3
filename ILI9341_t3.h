@@ -304,9 +304,9 @@ class ILI9341_t3 : public Print
 	void setFontAdafruit(void) { font = NULL; }
 	void drawFontChar(unsigned int c);
 	void measureChar(uint8_t c, uint16_t* w, uint16_t* h);
-	uint16_t fontCapHeight() { return font->cap_height; }
-  uint16_t fontLineSpace() { return font->line_space; }
-  uint16_t fontGap() { return font->line_space - font->cap_height; };
+	uint16_t fontCapHeight() { return (font)? font->cap_height : textsize*8; }
+  uint16_t fontLineSpace() { return (font)? font->line_space : textsize*8; }
+  uint16_t fontGap() { return (font)? font->line_space - font->cap_height : 0; };
 
   alignment_t setTextAlign(alignment_t align = ALIGN_DEFAULT) { alignment_t oldalign = _textalign; _textalign = align; return oldalign; }
   alignment_t getTextAlign() { return _textalign; }
