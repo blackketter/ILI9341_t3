@@ -53,6 +53,12 @@
 #include "Arduino.h"
 #endif
 
+#if defined(__MKL26Z64__)
+#error "Sorry, ILI9341_t3 does not work with Teensy LC.  Use Adafruit_ILI9341."
+#elif defined(__AVR__)
+#error "Sorry, ILI9341_t3 does not work with Teensy 2.0 or Teensy++ 2.0.  Use Adafruit_ILI9341."
+#endif
+
 #define ILI9341_TFTWIDTH  240
 #define ILI9341_TFTHEIGHT 320
 
@@ -139,6 +145,10 @@
 
 #define sint16_t int16_t
 
+
+// Documentation on the ILI9341_t3 font data format:
+// https://forum.pjrc.com/threads/54316-ILI9341_t-font-structure-format
+
 typedef struct {
 	const unsigned char *index;
 	const unsigned char *unicode;
@@ -172,6 +182,10 @@ enum alignment_t {
 };
 
 #ifdef __cplusplus
+// At all other speeds, ILI9241_KINETISK__pspi->beginTransaction() will use the fastest available clock
+#include <SPI.h>
+#define ILI9341_SPICLOCK 30000000
+#define ILI9341_SPICLOCK_READ 2000000
 
 class ILI9341_t3 : public Print
 {
@@ -304,17 +318,19 @@ class ILI9341_t3 : public Print
 	void setFontAdafruit(void) { font = NULL; }
 	void drawFontChar(unsigned int c);
 	void measureChar(uint8_t c, uint16_t* w, uint16_t* h);
-	uint16_t fontCapHeight() { return font->cap_height; }
-  uint16_t fontLineSpace() { return font->line_space; }
-  uint16_t fontGap() { return font->line_space - font->cap_height; };
+
+	uint16_t fontCapHeight() { return (font) ? font->cap_height : textsize * 8; }
+	uint16_t fontLineSpace() { return (font) ? font->line_space : textsize * 8; }
+	uint16_t fontGap() { return (font) ? font->line_space - font->cap_height : 0; };
 
   alignment_t setTextAlign(alignment_t align = ALIGN_DEFAULT) { alignment_t oldalign = _textalign; _textalign = align; return oldalign; }
   alignment_t getTextAlign() { return _textalign; }
 
   void drawText(const char* text);
 
-  uint16_t measureTextWidth(const char* text, int chars = 0);
-  uint16_t measureTextHeight(const char* text, int chars = 0);
+	uint16_t measureTextWidth(const char* text, int chars = 0);
+	uint16_t measureTextHeight(const char* text, int chars = 0);
+
 	int16_t strPixelLen(char * str);
 
  protected:
@@ -362,7 +378,18 @@ class ILI9341_t3 : public Print
   	uint8_t _cs, _dc;
 	uint8_t pcs_data, pcs_command;
 	uint8_t _miso, _mosi, _sclk;
-
+	// add support to allow only one hardware CS (used for dc)
+#if defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x
+    uint32_t _cspinmask;
+    volatile uint32_t *_csport;
+    uint32_t _spi_tcr_current;
+    uint32_t _dcpinmask;
+    uint8_t _pending_rx_count;
+    volatile uint32_t *_dcport;
+#else
+    uint8_t _cspinmask;
+    volatile uint8_t *_csport;
+#endif
 	void setAddr(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 	  __attribute__((always_inline)) {
 		writecommand_cont(ILI9341_CASET); // Column addr set
@@ -372,6 +399,116 @@ class ILI9341_t3 : public Print
 		writedata16_cont(y0);   // YSTART
 		writedata16_cont(y1);   // YEND
 	}
+
+//----------------------------------------------------------------------
+// Processor Specific stuff
+
+#if defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x
+// T4
+	void DIRECT_WRITE_LOW(volatile uint32_t * base, uint32_t mask)  __attribute__((always_inline)) {
+		*(base+34) = mask;
+	}
+	void DIRECT_WRITE_HIGH(volatile uint32_t * base, uint32_t mask)  __attribute__((always_inline)) {
+		*(base+33) = mask;
+	}
+	void waitFifoNotFull(void) {
+    	uint32_t tmp __attribute__((unused));
+    	do {
+        	if ((IMXRT_LPSPI4_S.RSR & LPSPI_RSR_RXEMPTY) == 0)  {
+            	tmp = IMXRT_LPSPI4_S.RDR;  // Read any pending RX bytes in
+            	if (_pending_rx_count) _pending_rx_count--; //decrement count of bytes still levt
+        	}
+    	} while ((IMXRT_LPSPI4_S.SR & LPSPI_SR_TDF) == 0) ;
+	}
+	void waitTransmitComplete(void)  {
+	    uint32_t tmp __attribute__((unused));
+	//    digitalWriteFast(2, HIGH);
+
+	    while (_pending_rx_count) {
+	        if ((IMXRT_LPSPI4_S.RSR & LPSPI_RSR_RXEMPTY) == 0)  {
+	            tmp = IMXRT_LPSPI4_S.RDR;  // Read any pending RX bytes in
+	            _pending_rx_count--; //decrement count of bytes still levt
+	        }
+	    }
+	    IMXRT_LPSPI4_S.CR = LPSPI_CR_MEN | LPSPI_CR_RRF;       // Clear RX FIFO
+	//    digitalWriteFast(2, LOW);
+	}
+
+
+	#define TCR_MASK  (LPSPI_TCR_PCS(3) | LPSPI_TCR_FRAMESZ(31) | LPSPI_TCR_CONT | LPSPI_TCR_RXMSK )
+	void maybeUpdateTCR(uint32_t requested_tcr_state) /*__attribute__((always_inline)) */ {
+		if ((_spi_tcr_current & TCR_MASK) != requested_tcr_state) {
+			bool dc_state_change = (_spi_tcr_current & LPSPI_TCR_PCS(3)) != (requested_tcr_state & LPSPI_TCR_PCS(3));
+			_spi_tcr_current = (_spi_tcr_current & ~TCR_MASK) | requested_tcr_state ;
+			// only output when Transfer queue is empty.
+			if (!dc_state_change || !_dcpinmask) {
+				while ((IMXRT_LPSPI4_S.FSR & 0x1f) )	;
+				IMXRT_LPSPI4_S.TCR = _spi_tcr_current;	// update the TCR
+
+			} else {
+				waitTransmitComplete();
+				if (requested_tcr_state & LPSPI_TCR_PCS(3)) DIRECT_WRITE_HIGH(_dcport, _dcpinmask);
+				else DIRECT_WRITE_LOW(_dcport, _dcpinmask);
+				IMXRT_LPSPI4_S.TCR = _spi_tcr_current & ~(LPSPI_TCR_PCS(3) | LPSPI_TCR_CONT);	// go ahead and update TCR anyway?  
+
+			}
+		}
+	}
+
+	void beginSPITransaction(uint32_t clock = ILI9341_SPICLOCK) __attribute__((always_inline)) {
+		SPI.beginTransaction(SPISettings(clock, MSBFIRST, SPI_MODE0));
+		if (_csport)
+			DIRECT_WRITE_LOW(_csport, _cspinmask);
+	}
+	void endSPITransaction() __attribute__((always_inline)) {
+		if (_csport)
+			DIRECT_WRITE_HIGH(_csport, _cspinmask);
+		SPI.endTransaction();
+	}
+
+	// BUGBUG:: currently assumming we only have CS_0 as valid CS
+	void writecommand_cont(uint8_t c) __attribute__((always_inline)) {
+		maybeUpdateTCR(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7) /*| LPSPI_TCR_CONT*/);
+		IMXRT_LPSPI4_S.TDR = c;
+		_pending_rx_count++;	//
+		waitFifoNotFull();
+	}
+	void writedata8_cont(uint8_t c) __attribute__((always_inline)) {
+		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
+		IMXRT_LPSPI4_S.TDR = c;
+		_pending_rx_count++;	//
+		waitFifoNotFull();
+	}
+	void writedata16_cont(uint16_t d) __attribute__((always_inline)) {
+		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(15) | LPSPI_TCR_CONT);
+		IMXRT_LPSPI4_S.TDR = d;
+		_pending_rx_count++;	//
+		waitFifoNotFull();
+	}
+	void writecommand_last(uint8_t c) __attribute__((always_inline)) {
+		maybeUpdateTCR(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7));
+		IMXRT_LPSPI4_S.TDR = c;
+//		IMXRT_LPSPI4_S.SR = LPSPI_SR_WCF | LPSPI_SR_FCF | LPSPI_SR_TCF;
+		_pending_rx_count++;	//
+		waitTransmitComplete();
+	}
+	void writedata8_last(uint8_t c) __attribute__((always_inline)) {
+		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7));
+		IMXRT_LPSPI4_S.TDR = c;
+//		IMXRT_LPSPI4_S.SR = LPSPI_SR_WCF | LPSPI_SR_FCF | LPSPI_SR_TCF;
+		_pending_rx_count++;	//
+		waitTransmitComplete();
+	}
+	void writedata16_last(uint16_t d) __attribute__((always_inline)) {
+		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(15));
+		IMXRT_LPSPI4_S.TDR = d;
+//		IMXRT_LPSPI4_S.SR = LPSPI_SR_WCF | LPSPI_SR_FCF | LPSPI_SR_TCF;
+		_pending_rx_count++;	//
+		waitTransmitComplete();
+	}
+
+#else
+// T3.x	
 	//void waitFifoNotFull(void) __attribute__((always_inline)) {
 	void waitFifoNotFull(void) {
 		uint32_t sr;
@@ -407,6 +544,17 @@ class ILI9341_t3 : public Print
 			tmp = KINETISK_SPI0.POPR;
 		}
 	}
+	void beginSPITransaction(uint32_t clock = ILI9341_SPICLOCK) __attribute__((always_inline)) {
+		SPI.beginTransaction(SPISettings(clock, MSBFIRST, SPI_MODE0));
+		if (_csport)
+			*_csport  &= ~_cspinmask;
+	}
+	void endSPITransaction() __attribute__((always_inline)) {
+		if (_csport)
+			*_csport |= _cspinmask;
+		SPI.endTransaction();
+	}
+
 	void writecommand_cont(uint8_t c) __attribute__((always_inline)) {
 		KINETISK_SPI0.PUSHR = c | (pcs_command << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_CONT;
 		waitFifoNotFull();
@@ -435,6 +583,7 @@ class ILI9341_t3 : public Print
 		KINETISK_SPI0.PUSHR = d | (pcs_data << 16) | SPI_PUSHR_CTAS(1) | SPI_PUSHR_EOQ;
 		waitTransmitComplete(mcr);
 	}
+#endif
 
 	void HLine(int16_t x, int16_t y, int16_t w, uint16_t color)
 	  __attribute__((always_inline)) {
