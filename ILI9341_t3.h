@@ -345,7 +345,7 @@ class ILI9341_t3 : public Print
   }
 
   virtual void write16BitColor(uint16_t color, uint16_t count, bool last_pixel) {
-  // TODO
+		do { write16BitColor(color, last_pixel); } while (--count > 0);
   }
 
 
@@ -599,7 +599,7 @@ class ILI9341_t3 : public Print
 
 		setAddr(x, y, x+w-1, y);
 		writecommand_cont(ILI9341_RAMWR);
-		do { writedata16_cont(color); } while (--w > 0);
+		write16BitColor(color, w, false);
 	}
 	void VLine(int16_t x, int16_t y, int16_t h, uint16_t color)
 	  __attribute__((always_inline)) {
@@ -615,7 +615,7 @@ class ILI9341_t3 : public Print
 
 		setAddr(x, y, x, y+h-1);
 		writecommand_cont(ILI9341_RAMWR);
-		do { writedata16_cont(color); } while (--h > 0);
+		write16BitColor(color, h, false);
 	}
 	void Pixel(int16_t x, int16_t y, uint16_t color)
 	  __attribute__((always_inline)) {
@@ -623,12 +623,13 @@ class ILI9341_t3 : public Print
     x+=_originx;
     y+=_originy;
 
-  	if((x < _displayclipx1) ||(x >= _displayclipx2) || (y < _displayclipy1) || (y >= _displayclipy2)) return;
+    	if((x < _displayclipx1) ||(x >= _displayclipx2) || (y < _displayclipy1) || (y >= _displayclipy2)) return;
 
 		setAddr(x, y, x, y);
 		writecommand_cont(ILI9341_RAMWR);
-		writedata16_cont(color);
+		write16BitColor(color);
 	}
+	
 	void drawFontBits(bool opaque, uint32_t bits, uint32_t numbits, int32_t x, int32_t y, uint32_t repeat);
 };
 
