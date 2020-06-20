@@ -82,7 +82,7 @@ ILI9341_t3::ILI9341_t3(uint8_t cs, uint8_t dc, uint8_t rst, uint8_t mosi, uint8_
 
 void ILI9341_t3::setAddrWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	setAddr(x0, y0, x1, y1);
 	writecommand_last(ILI9341_RAMWR); // write to RAM
 	endSPITransaction();
@@ -90,8 +90,8 @@ void ILI9341_t3::setAddrWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y
 
 void ILI9341_t3::pushColor(uint16_t color)
 {
-	beginSPITransaction();
-	write16BitColor(color,true);
+	beginSPITransaction(_clock);
+	writedata16_last(color);
 	endSPITransaction();
 }
 
@@ -100,7 +100,7 @@ void ILI9341_t3::drawPixel(int16_t x, int16_t y, uint16_t color) {
 	y += _originy;
 	if((x < _displayclipx1) ||(x >= _displayclipx2) || (y < _displayclipy1) || (y >= _displayclipy2)) return;
 
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	setAddr(x, y, x, y);
 	writecommand_cont(ILI9341_RAMWR);
 //	writedata16_last(color);
@@ -118,7 +118,7 @@ void ILI9341_t3::drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color)
 	if((y+h-1) >= _displayclipy2) h = _displayclipy2-y;
 	if(h<1) return;
 
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	setAddr(x, y, x, y+h-1);
 	writecommand_cont(ILI9341_RAMWR);
 	while (h-- > 1) {
@@ -139,7 +139,7 @@ void ILI9341_t3::drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color)
 	if((x+w-1) >= _displayclipx2)  w = _displayclipx2-x;
 	if (w<1) return;
 
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	setAddr(x, y, x+w-1, y);
 	writecommand_cont(ILI9341_RAMWR);
 	while (w-- > 1) {
@@ -147,6 +147,24 @@ void ILI9341_t3::drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color)
 	}
 	write16BitColor(color,true);
 	endSPITransaction();
+}
+void ILI9341_t3::drawFastHLineInternal(int16_t x, int16_t y, int16_t w, uint16_t color)
+{
+	x+=_originx;
+	y+=_originy;
+
+	// Rectangular clipping
+	if((y < _displayclipy1) || (x >= _displayclipx2) || (y >= _displayclipy2)) return;
+	if(x<_displayclipx1) { w = w - (_displayclipx1 - x); x = _displayclipx1; }
+	if((x+w-1) >= _displayclipx2)  w = _displayclipx2-x;
+	if (w<1) return;
+
+	setAddr(x, y, x+w-1, y);
+	writecommand_cont(ILI9341_RAMWR);
+	while (w-- > 1) {
+		write16BitColor(color);
+	}
+	write16BitColor(color,true);
 }
 
 void ILI9341_t3::drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t* colors)
@@ -215,7 +233,7 @@ void ILI9341_t3::fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c
 	// TODO: this can result in a very long transaction time
 	// should break this into multiple transactions, even though
 	// it'll cost more overhead, so we don't stall other SPI libs
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	setAddr(x, y, x+w-1, y+h-1);
 	writecommand_cont(ILI9341_RAMWR);
 	for(y=h; y>0; y--) {
@@ -225,7 +243,7 @@ void ILI9341_t3::fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c
 		write16BitColor(color,true);
 		if (y > 1 && (y & 1)) {
 			endSPITransaction();
-			beginSPITransaction();
+			beginSPITransaction(_clock);
 		}
 	}
 	endSPITransaction();
@@ -248,7 +266,7 @@ void ILI9341_t3::fillRectVGradient(int16_t x, int16_t y, int16_t w, int16_t h, u
 	// TODO: this can result in a very long transaction time
 	// should break this into multiple transactions, even though
 	// it'll cost more overhead, so we don't stall other SPI libs
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	setAddr(x, y, x+w-1, y+h-1);
 	writecommand_cont(ILI9341_RAMWR);
 	for(y=h; y>0; y--) {
@@ -260,7 +278,7 @@ void ILI9341_t3::fillRectVGradient(int16_t x, int16_t y, int16_t w, int16_t h, u
 		write16BitColor(color,true);
 		if (y > 1 && (y & 1)) {
 			endSPITransaction();
-			beginSPITransaction();
+			beginSPITransaction(_clock);
 		}
 		r+=dr;g+=dg; b+=db;
 	}
@@ -284,7 +302,7 @@ void ILI9341_t3::fillRectHGradient(int16_t x, int16_t y, int16_t w, int16_t h, u
 	// TODO: this can result in a very long transaction time
 	// should break this into multiple transactions, even though
 	// it'll cost more overhead, so we don't stall other SPI libs
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	setAddr(x, y, x+w-1, y+h-1);
 	writecommand_cont(ILI9341_RAMWR);
 	for(y=h; y>0; y--) {
@@ -298,7 +316,7 @@ void ILI9341_t3::fillRectHGradient(int16_t x, int16_t y, int16_t w, int16_t h, u
 		write16BitColor(color,true);
 		if (y > 1 && (y & 1)) {
 			endSPITransaction();
-			beginSPITransaction();
+			beginSPITransaction(_clock);
 		}
 		r=r1;g=g1;b=b1;
 	}
@@ -329,7 +347,7 @@ void ILI9341_t3::fillScreenHGradient(uint16_t color1, uint16_t color2)
 void ILI9341_t3::setRotation(uint8_t m)
 {
 	rotation = m % 4; // can't be higher than 3
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	writecommand_cont(ILI9341_MADCTL);
 	switch (rotation) {
 	case 0:
@@ -362,7 +380,7 @@ void ILI9341_t3::setRotation(uint8_t m)
 
 void ILI9341_t3::setScroll(uint16_t offset)
 {
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	writecommand_cont(ILI9341_VSCRSADD);
 	writedata16_last(offset);
 	endSPITransaction();
@@ -370,7 +388,7 @@ void ILI9341_t3::setScroll(uint16_t offset)
 
 void ILI9341_t3::invertDisplay(boolean i)
 {
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	writecommand_last(i ? ILI9341_INVON : ILI9341_INVOFF);
 	endSPITransaction();
 }
@@ -408,7 +426,7 @@ uint8_t ILI9341_t3::readcommand8(uint8_t c, uint8_t index)
     uint16_t wTimeout = 0xffff;
     uint8_t r=0;
 
-    beginSPITransaction();
+    beginSPITransaction(_clock);
     while (((KINETISK_SPI0.SR) & (15 << 12)) && (--wTimeout)) ; // wait until empty
 
     // Make sure the last frame has been sent...
@@ -454,7 +472,7 @@ uint8_t ILI9341_t3::readcommand8(uint8_t c, uint8_t index)
     }
     endSPITransaction();
     return r;  // get the received byte... should check for it first...
-#elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x 
+#elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x
     uint16_t wTimeout = 0xffff;
     uint8_t r=0;
 
@@ -462,19 +480,19 @@ uint8_t ILI9341_t3::readcommand8(uint8_t c, uint8_t index)
     // Lets assume that queues are empty as we just started transaction.
 	IMXRT_LPSPI4_S.CR = LPSPI_CR_MEN | LPSPI_CR_RRF | LPSPI_CR_RTF;   // actually clear both...
     //writecommand(0xD9); // sekret command
-    maybeUpdateTCR(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
+    maybeUpdateTCR(_tcr_dc_assert | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
 	IMXRT_LPSPI4_S.TDR = 0xD9;
 
     // writedata(0x10 + index);
-	maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
+	maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
 	IMXRT_LPSPI4_S.TDR = 0x10 + index;
 
     // writecommand(c);
-    maybeUpdateTCR(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
+    maybeUpdateTCR(_tcr_dc_assert | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
 	IMXRT_LPSPI4_S.TDR = c;
 
     // readdata
-	maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7));
+	maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(7));
 	IMXRT_LPSPI4_S.TDR = 0;
 
     // Now wait until completed.
@@ -489,7 +507,7 @@ uint8_t ILI9341_t3::readcommand8(uint8_t c, uint8_t index)
     endSPITransaction();
     return r;  // get the received byte... should check for it first...
 #else
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	writecommand_cont(0xD9);
 	writedata8_cont(0x10 + index);
 
@@ -499,7 +517,7 @@ uint8_t ILI9341_t3::readcommand8(uint8_t c, uint8_t index)
 	endSPITransaction();
 	return r;
 
-#endif   
+#endif
 }
 
 
@@ -507,7 +525,7 @@ uint8_t ILI9341_t3::readcommand8(uint8_t c, uint8_t index)
 uint16_t ILI9341_t3::readPixel(int16_t x, int16_t y)
 {
    if (_miso == 0xff) return 0xffff;	// bail if not valid miso
-#ifdef KINETISK	
+#ifdef KINETISK
 	uint8_t dummy __attribute__((unused));
 	uint8_t r,g,b;
 
@@ -542,7 +560,7 @@ uint16_t ILI9341_t3::readPixel(int16_t x, int16_t y)
 	uint16_t colors = 0;
 	readRect(x, y, 1, 1, &colors);
 	return colors;
-#endif	
+#endif
 }
 
 // Now lets see if we can read in multiple pixels
@@ -591,7 +609,7 @@ void ILI9341_t3::readRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t *
 	}
 	endSPITransaction();
 }
-#elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x 
+#elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x
 void ILI9341_t3::readRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t *pcolors)
 {
    if (_miso == 0xff) return;		// bail if not valid miso
@@ -617,7 +635,7 @@ void ILI9341_t3::readRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t *
 			if (txCount) {
 				IMXRT_LPSPI4_S.TDR = 0;
 			} else {
-				maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7)); // remove the CONTINUE...
+				maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(7)); // remove the CONTINUE...
 				while ((IMXRT_LPSPI4_S.SR & LPSPI_SR_TDF) == 0) ;		// wait if queue was full
 				IMXRT_LPSPI4_S.TDR = 0;
 			}
@@ -644,7 +662,7 @@ void ILI9341_t3::readRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t *
 // Now lets see if we can writemultiple pixels
 void ILI9341_t3::writeRect(int16_t x, int16_t y, int16_t w, int16_t h, const uint16_t *pcolors)
 {
-   	beginSPITransaction();
+   	beginSPITransaction(_clock);
 	setAddr(x, y, x+w-1, y+h-1);
 	writecommand_cont(ILI9341_RAMWR);
 	for(y=h; y>0; y--) {
@@ -661,7 +679,7 @@ void ILI9341_t3::writeRect(int16_t x, int16_t y, int16_t w, int16_t h, const uin
 //					color palette data in array at palette
 void ILI9341_t3::writeRect8BPP(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t *pixels, const uint16_t * palette )
 {
-   	beginSPITransaction();
+   	beginSPITransaction(_clock);
 	setAddr(x, y, x+w-1, y+h-1);
 	writecommand_cont(ILI9341_RAMWR);
 	for(y=h; y>0; y--) {
@@ -679,7 +697,7 @@ void ILI9341_t3::writeRect8BPP(int16_t x, int16_t y, int16_t w, int16_t h, const
 //					width must be at least 2 pixels
 void ILI9341_t3::writeRect4BPP(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t *pixels, const uint16_t * palette )
 {
-   	beginSPITransaction();
+   	beginSPITransaction(_clock);
 	setAddr(x, y, x+w-1, y+h-1);
 	writecommand_cont(ILI9341_RAMWR);
 	for(y=h; y>0; y--) {
@@ -699,7 +717,7 @@ void ILI9341_t3::writeRect4BPP(int16_t x, int16_t y, int16_t w, int16_t h, const
 //					width must be at least 4 pixels
 void ILI9341_t3::writeRect2BPP(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t *pixels, const uint16_t * palette )
 {
-   	beginSPITransaction();
+   	beginSPITransaction(_clock);
 	setAddr(x, y, x+w-1, y+h-1);
 	writecommand_cont(ILI9341_RAMWR);
 	for(y=h; y>0; y--) {
@@ -724,7 +742,7 @@ void ILI9341_t3::writeRect2BPP(int16_t x, int16_t y, int16_t w, int16_t h, const
 //					width must be at least 8 pixels
 void ILI9341_t3::writeRect1BPP(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t *pixels, const uint16_t * palette )
 {
-   	beginSPITransaction();
+   	beginSPITransaction(_clock);
 	setAddr(x, y, x+w-1, y+h-1);
 	writecommand_cont(ILI9341_RAMWR);
 	for(y=h; y>0; y--) {
@@ -788,12 +806,12 @@ void ILI9341_t3::begin(void)
     #ifdef KINETISK
     #if defined(__MK64FX512__) || defined(__MK66FX1M0__)
     // Allow to work with mimimum of MOSI and SCK
-    if ((_mosi == 255 || _mosi == 11 || _mosi == 7 || _mosi == 28)  && (_sclk == 255 || _sclk == 13 || _sclk == 14 || _sclk == 27)) 
+    if ((_mosi == 255 || _mosi == 11 || _mosi == 7 || _mosi == 28)  && (_sclk == 255 || _sclk == 13 || _sclk == 14 || _sclk == 27))
 	#else
-    if ((_mosi == 255 || _mosi == 11 || _mosi == 7) && (_sclk == 255 || _sclk == 13 || _sclk == 14)) 
-    #endif	
+    if ((_mosi == 255 || _mosi == 11 || _mosi == 7) && (_sclk == 255 || _sclk == 13 || _sclk == 14))
+    #endif
     {
-        
+
 		if (_mosi != 255) SPI.setMOSI(_mosi);
         if (_sclk != 255) SPI.setSCK(_sclk);
 
@@ -803,7 +821,7 @@ void ILI9341_t3::begin(void)
 		#else
 	    if (_miso == 12 || _miso == 8)
 	    #endif
-		{	
+		{
         	SPI.setMISO(_miso);
     	} else {
 			_miso = 0xff;	// set miso to 255 as flag it is bad
@@ -830,28 +848,33 @@ void ILI9341_t3::begin(void)
 
 		}
 	}
-#elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x 
+#elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x
 	_pending_rx_count = 0;
 	SPI.begin();
 	_csport = portOutputRegister(_cs);
 	_cspinmask = digitalPinToBitMask(_cs);
-	pinMode(_cs, OUTPUT);	
+	pinMode(_cs, OUTPUT);
 	DIRECT_WRITE_HIGH(_csport, _cspinmask);
-	_spi_tcr_current = IMXRT_LPSPI4_S.TCR; // get the current TCR value 
+	_spi_tcr_current = IMXRT_LPSPI4_S.TCR; // get the current TCR value
 
 	// TODO:  Need to setup DC to actually work.
 	if (SPI.pinIsChipSelect(_dc)) {
-	 	SPI.setCS(_dc);
+	 	uint8_t dc_cs_index = SPI.setCS(_dc);
 	 	_dcport = 0;
 	 	_dcpinmask = 0;
+	 	dc_cs_index--;	// convert to 0 based
+		_tcr_dc_assert = LPSPI_TCR_PCS(dc_cs_index);
+    	_tcr_dc_not_assert = LPSPI_TCR_PCS(3);
 	} else {
 		//Serial.println("ILI9341_t3n: Error not DC is not valid hardware CS pin");
 		_dcport = portOutputRegister(_dc);
 		_dcpinmask = digitalPinToBitMask(_dc);
-		pinMode(_dc, OUTPUT);	
+		pinMode(_dc, OUTPUT);
 		DIRECT_WRITE_HIGH(_dcport, _dcpinmask);
+		_tcr_dc_assert = LPSPI_TCR_PCS(0);
+    	_tcr_dc_not_assert = LPSPI_TCR_PCS(1);
 	}
-	maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7));
+	maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(7));
 
 
 #endif
@@ -877,7 +900,7 @@ void ILI9341_t3::begin(void)
 	x = readcommand8(ILI9341_RDSELFDIAG);
 	Serial.print("\nSelf Diagnostic: 0x"); Serial.println(x, HEX);
 	*/
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	const uint8_t *addr = init_commands();
 	while (1) {
 		uint8_t count = *addr++;
@@ -890,8 +913,8 @@ void ILI9341_t3::begin(void)
 	writecommand_last(ILI9341_SLPOUT);    // Exit Sleep
 	endSPITransaction();
 
-	delay(120); 		
-	beginSPITransaction();
+	delay(120);
+	beginSPITransaction(_clock);
 	writecommand_last(ILI9341_DISPON);    // Display on
 	endSPITransaction();
 	// in case we rebooted in the middle of a scroll
@@ -979,7 +1002,9 @@ void ILI9341_t3::drawCircleHelper( int16_t x0, int16_t y0,
   int16_t ddF_y = -2 * r;
   int16_t x     = 0;
   int16_t y     = r;
+  int xold;
 
+  xold = x;
   while (x<y) {
     if (f >= 0) {
       y--;
@@ -989,22 +1014,25 @@ void ILI9341_t3::drawCircleHelper( int16_t x0, int16_t y0,
     x++;
     ddF_x += 2;
     f     += ddF_x;
-    if (cornername & 0x4) {
-      drawPixel(x0 + x, y0 + y, color);
-      drawPixel(x0 + y, y0 + x, color);
-    }
-    if (cornername & 0x2) {
-      drawPixel(x0 + x, y0 - y, color);
-      drawPixel(x0 + y, y0 - x, color);
-    }
-    if (cornername & 0x8) {
-      drawPixel(x0 - y, y0 + x, color);
-      drawPixel(x0 - x, y0 + y, color);
-    }
-    if (cornername & 0x1) {
-      drawPixel(x0 - y, y0 - x, color);
-      drawPixel(x0 - x, y0 - y, color);
-    }
+    if (f >= 0 || x == y) { // time to draw the new line segment
+        if (cornername & 0x4) {
+            drawFastHLine(x0 + xold+1, y0 + y, x-xold, color);
+            drawFastVLine(x0 + y, y0 + xold+1, x-xold, color);
+        }
+        if (cornername & 0x2) {
+            drawFastHLine(x0 + xold+1, y0 - y, x-xold, color);
+            drawFastVLine(x0 + y, y0 - x, x-xold, color);
+        }
+        if (cornername & 0x8) {
+            drawFastVLine(x0 - y, y0 + xold+1, x-xold, color);
+            drawFastHLine(x0 - x, y0 + y, x-xold, color);
+        }
+        if (cornername & 0x1) {
+            drawFastVLine(x0 - y, y0 - x, x-xold, color);
+            drawFastHLine(x0 - x, y0 - y, x-xold, color);
+        }
+        xold = x;
+     } // draw new line segment
   }
 }
 
@@ -1091,7 +1119,7 @@ void ILI9341_t3::drawLine(int16_t x0, int16_t y0,
 		ystep = -1;
 	}
 
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	int16_t xbegin = x0;
 	if (steep) {
 		for (; x0<=x1; x0++) {
@@ -1138,7 +1166,7 @@ void ILI9341_t3::drawLine(int16_t x0, int16_t y0,
 // Draw a rectangle
 void ILI9341_t3::drawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
 {
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	HLine(x, y, w, color);
 	HLine(x, y+h-1, w, color);
 	VLine(x, y, h, color);
@@ -1364,88 +1392,28 @@ void ILI9341_t3::drawChar(int16_t x, int16_t y, unsigned char c,
 	if (c == 0xa0) { c = ' '; } // handle non-breaking space as a space
 
 	if (fgcolor == bgcolor) {
-		// This transparent approach is only about 20% faster
-		// Don't need to clip here since the called rendering primitives all clip
-		if (size == 1) {
-			uint8_t mask = 0x01;
-			int16_t xoff, yoff;
-			for (yoff=0; yoff < 8; yoff++) {
-				uint8_t line = 0;
-				for (xoff=0; xoff < 5; xoff++) {
-					if (glcdfont[c * 5 + xoff] & mask) line |= 1;
-					line <<= 1;
+		int16_t xoff, yoff, count;
+		uint8_t mask = 0x1;
+		uint8_t *s = (uint8_t *)&glcdfont[c * 5];
+		for (yoff=0; yoff < 8; yoff++) {
+			xoff = 0;
+			while (xoff < 5) {
+				while (xoff < 5 && !(s[xoff] & mask))
+					xoff++; // skip transparent bg
+				count = 0;
+				while (xoff < 5 && s[xoff] & mask) { // fg
+					count++;
+					xoff++;
 				}
-				line >>= 1;
-				xoff = 0;
-				while (line) {
-					if (line == 0x1F) {
-						drawFastHLine(x + xoff, y + yoff, 5, fgcolor);
-						break;
-					} else if (line == 0x1E) {
-						drawFastHLine(x + xoff, y + yoff, 4, fgcolor);
-						break;
-					} else if ((line & 0x1C) == 0x1C) {
-						drawFastHLine(x + xoff, y + yoff, 3, fgcolor);
-						line <<= 4;
-						xoff += 4;
-					} else if ((line & 0x18) == 0x18) {
-						drawFastHLine(x + xoff, y + yoff, 2, fgcolor);
-						line <<= 3;
-						xoff += 3;
-					} else if ((line & 0x10) == 0x10) {
-						drawPixel(x + xoff, y + yoff, fgcolor);
-						line <<= 2;
-						xoff += 2;
-					} else {
-						line <<= 1;
-						xoff += 1;
-					}
+				if (count) {
+					if (size == 1)
+						drawFastHLine(x+xoff-count, y + yoff, count, fgcolor);
+					else
+						fillRect(x + (xoff-count) * size, y + yoff * size, count * size, size, fgcolor);
 				}
-				mask = mask << 1;
-			}
-		} else {
-			uint8_t mask = 0x01;
-			int16_t xoff, yoff;
-			for (yoff=0; yoff < 8; yoff++) {
-				uint8_t line = 0;
-				for (xoff=0; xoff < 5; xoff++) {
-					if (glcdfont[c * 5 + xoff] & mask) line |= 1;
-					line <<= 1;
-				}
-				line >>= 1;
-				xoff = 0;
-				while (line) {
-					if (line == 0x1F) {
-						fillRect(x + xoff * size, y + yoff * size,
-							5 * size, size, fgcolor);
-						break;
-					} else if (line == 0x1E) {
-						fillRect(x + xoff * size, y + yoff * size,
-							4 * size, size, fgcolor);
-						break;
-					} else if ((line & 0x1C) == 0x1C) {
-						fillRect(x + xoff * size, y + yoff * size,
-							3 * size, size, fgcolor);
-						line <<= 4;
-						xoff += 4;
-					} else if ((line & 0x18) == 0x18) {
-						fillRect(x + xoff * size, y + yoff * size,
-							2 * size, size, fgcolor);
-						line <<= 3;
-						xoff += 3;
-					} else if ((line & 0x10) == 0x10) {
-						fillRect(x + xoff * size, y + yoff * size,
-							size, size, fgcolor);
-						line <<= 2;
-						xoff += 2;
-					} else {
-						line <<= 1;
-						xoff += 1;
-					}
-				}
-				mask = mask << 1;
-			}
-		}
+			} // while xoff
+			mask = mask << 1;
+		} // for y
 	} else {
 
 		x+=_originx;
@@ -1459,7 +1427,7 @@ void ILI9341_t3::drawChar(int16_t x, int16_t y, unsigned char c,
 			return;
 
 		// This solid background approach is about 5 time faster
-		beginSPITransaction();
+		beginSPITransaction(_clock);
 		setAddr(x, y, x + 6 * size - 1, y + 8 * size - 1);
 		writecommand_cont(ILI9341_RAMWR);
 		uint8_t xr, yr;
@@ -1468,11 +1436,7 @@ void ILI9341_t3::drawChar(int16_t x, int16_t y, unsigned char c,
 		for (y=0; y < 8; y++) {
 			for (yr=0; yr < size; yr++) {
 				for (x=0; x < 5; x++) {
-					if (glcdfont[c * 5 + x] & mask) {
-						color = fgcolor;
-					} else {
-						color = bgcolor;
-					}
+					color = (glcdfont[c * 5 + x] & mask) ? fgcolor : bgcolor;
 					for (xr=0; xr < size; xr++) {
 						write16BitColor(color);
 					}
@@ -1488,30 +1452,30 @@ void ILI9341_t3::drawChar(int16_t x, int16_t y, unsigned char c,
 	}
 }
 
-static uint32_t fetchbit(const uint8_t *p, uint32_t index)
+static inline uint32_t fetchbit(const uint8_t *p, uint32_t index)
 {
-	if (p[index >> 3] & (1 << (7 - (index & 7)))) return 1;
-	return 0;
+	return (p[index >> 3] & (0x80 >> (index & 7)));
 }
 
 static uint32_t fetchbits_unsigned(const uint8_t *p, uint32_t index, uint32_t required)
 {
-	uint32_t val = 0;
-	do {
-		uint8_t b = p[index >> 3];
-		uint32_t avail = 8 - (index & 7);
-		if (avail <= required) {
-			val <<= avail;
-			val |= b & ((1 << avail) - 1);
-			index += avail;
-			required -= avail;
-		} else {
-			b >>= avail - required;
-			val <<= required;
-			val |= b & ((1 << required) - 1);
-			break;
-		}
-	} while (required);
+uint32_t val;
+uint8_t *s = (uint8_t *)&p[index>>3];
+
+#ifdef UNALIGNED_IS_SAFE
+	val = *(uint32_t *)s; // read 4 bytes - unaligned is ok
+	val = __builtin_bswap32(val); // change to big-endian order
+#else
+	val = s[0] << 24;
+	val |= (s[1] << 16);
+	val |= (s[2] << 8);
+	val |= s[3];
+#endif
+	val <<= (index & 7); // shift out used bits
+	if (32 - (index & 7) < required) { // need to get more bits
+		val |= (s[4] >> (8 - (index & 7)));
+        }
+	val >>= (32-required); // right align the bits
 	return val;
 }
 
@@ -1798,91 +1762,22 @@ int16_t ILI9341_t3::strPixelLen(char * str)
 	return( maxlen );
 }
 
-#if 0
-// todo: make this draw opaqe
-void ILI9341_t3::drawFontBits(uint32_t bits, uint32_t numbits, int32_t x, int32_t y, uint32_t repeat)
-{
-	x+=_originx;
-	y+=_originy;
-
-	if(
-		(x < _displayclipx1) ||
-		(x >= _displayclipx2) ||
-		(y < _displayclipy1) ||
-		(y >= _displayclipy2))
-			return;
-
-	if ((x+(int32_t)numbits) > _displayclipx2) {
-		numbits -= ((x+numbits) - _displayclipx2);
-	}
-
-	if (y+(int32_t)repeat > _displayclipy2) {
-		repeat -= ((y+repeat) - _displayclipy2);
-	}
-
-	if (bits == 0) return;
-	beginSPITransaction();
-	int w = 0;
-	do {
-		int32_t x1 = x;
-		uint32_t n = numbits;
-
-		writecommand_cont(ILI9341_PASET); // Row addr set
-		writedata16_cont(y);   // YSTART
-		writedata16_cont(y);   // YEND
-
-		do {
-			n--;
-			if (bits & (1 << n)) {
-				w++;
-			}
-			else if (w > 0) {
-				// "drawFastHLine(x1 - w, y, w, textcolor)"
-				writecommand_cont(ILI9341_CASET); // Column addr set
-				writedata16_cont(x1 - w);   // XSTART
-				writedata16_cont(x1);   // XEND
-				writecommand_cont(ILI9341_RAMWR);
-				while (w-- > 1) { // draw line
-					writedata16_cont(textcolor);
-				}
-				write16BitColor(textcolor,true);
-			}
-
-			x1++;
-		} while (n > 0);
-
-		if (w > 0) {
-				// "drawFastHLine(x1 - w, y, w, textcolor)"
-				writecommand_cont(ILI9341_CASET); // Column addr set
-				writedata16_cont(x1 - w);   // XSTART
-				writedata16_cont(x1);   // XEND
-				writecommand_cont(ILI9341_RAMWR);
-				while (w-- > 1) { //draw line
-					write16BitColor(textcolor);
-				}
-				write16BitColor(textcolor,true);
-		}
-
-		y++;
-		repeat--;
-	} while (repeat);
-	endSPITransaction();
-}
-#endif
-
-
 void ILI9341_t3::drawFontBits(bool opaque, uint32_t bits, uint32_t numbits, int32_t x, int32_t y, uint32_t repeat)
 {
+	beginSPITransaction(_clock);
+
 	if (bits == 0) {
 		if (opaque) {
 			while (repeat) {
-				drawFastHLine(x,y++, numbits, textbgcolor);
+				drawFastHLineInternal(x,y++, numbits, textbgcolor);
 				repeat--;
 			};
 		}
 		return;
 	}
 
+#if 1
+// OLDCODE
 	do {
 		int32_t x1 = x;
 		uint32_t n = numbits;
@@ -1897,14 +1792,14 @@ void ILI9341_t3::drawFontBits(bool opaque, uint32_t bits, uint32_t numbits, int3
 			if (bits & (1 << n)) {
 				if (bgw>0) {
 					if (opaque) {
-						drawFastHLine(x1 - bgw, y, bgw, textbgcolor);
+						drawFastHLineInternal(x1 - bgw, y, bgw, textbgcolor);
 					}
 					bgw=0;
 				}
 				w++;
 			} else {
 				if (w>0) {
-					drawFastHLine(x1 - w, y, w, textcolor);
+					drawFastHLineInternal(x1 - w, y, w, textcolor);
 					w = 0;
 				}
 				bgw++;
@@ -1913,18 +1808,46 @@ void ILI9341_t3::drawFontBits(bool opaque, uint32_t bits, uint32_t numbits, int3
 		} while (n > 0);
 
 		if (w > 0) {
-			drawFastHLine(x1 - w, y, w, textcolor);
+			drawFastHLineInternal(x1 - w, y, w, textcolor);
 		}
 
 		if (bgw > 0) {
 			if (opaque) {
-				drawFastHLine(x1 - bgw, y, bgw, textbgcolor);
+				drawFastHLineInternal(x1 - bgw, y, bgw, textbgcolor);
 			}
 		}
 
 		y++;
 		repeat--;
 	} while (repeat);
+#else
+// NEWCODE - TODO: Add opacity and fix corruption OR optimize OLDCODE
+	uint32_t w;
+	bits <<= (32-numbits); // left align bits
+	do {
+		w = __builtin_clz(bits); // skip over zeros
+		if (w > numbits) w = numbits;
+		numbits -= w;
+		x += w;
+		bits <<= w;
+		bits = ~bits; // invert to count 1s as 0s
+		w = __builtin_clz(bits);
+		if (w > numbits) w = numbits;
+		numbits -= w;
+		bits <<= w;
+		bits = ~bits; // invert back to original polarity
+		if (w > 0) {
+			x += w;
+			setAddr(x-w, y, x-1, y+repeat-1); // write a block of pixels w x repeat sized
+			writecommand_cont(ILI9341_RAMWR); // write to RAM
+			w *= repeat;
+			while (w-- > 1) { // draw line
+				writedata16_cont(textcolor);
+			}
+			writedata16_last(textcolor);
+		}
+	} while (numbits > 0);
+#endif
 	endSPITransaction();
 }
 
@@ -2050,10 +1973,10 @@ uint8_t ILI9341_t3::getRotation(void) {
 }
 
 void ILI9341_t3::sleep(bool enable) {
-	beginSPITransaction();
+	beginSPITransaction(_clock);
 	if (enable) {
-		writecommand_cont(ILI9341_DISPOFF);		
-		writecommand_last(ILI9341_SLPIN);	
+		writecommand_cont(ILI9341_DISPOFF);
+		writecommand_last(ILI9341_SLPIN);
 		  endSPITransaction();
 	} else {
 		writecommand_cont(ILI9341_DISPON);

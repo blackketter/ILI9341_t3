@@ -193,11 +193,13 @@ class ILI9341_t3 : public Print
 	ILI9341_t3(uint8_t _CS, uint8_t _DC, uint8_t _RST = 255, uint8_t _MOSI=11, uint8_t _SCLK=13, uint8_t _MISO=12);
 	void begin(void);
 	void sleep(bool enable);
+	void setClock(unsigned long clk) { _clock = clk;}
 	void pushColor(uint16_t color);
 	void fillScreen(uint16_t color);
 	void drawPixel(int16_t x, int16_t y, uint16_t color);
 	void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color);
 	void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color);
+	void drawFastHLineInternal(int16_t x, int16_t y, int16_t w, uint16_t color);
 	void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t* colors);
 	void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t* colors);
 	void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
@@ -348,7 +350,7 @@ class ILI9341_t3 : public Print
 		do { write16BitColor(color, last_pixel); } while (--count > 0);
   }
 
-
+	unsigned long _clock = ILI9341_SPICLOCK;
 	int16_t _width, _height; // Display w/h as modified by current rotation
 	int16_t  cursor_x, cursor_y;
 
@@ -386,18 +388,27 @@ class ILI9341_t3 : public Print
     uint32_t _dcpinmask;
     uint8_t _pending_rx_count;
     volatile uint32_t *_dcport;
+    uint32_t _tcr_dc_assert;
+    uint32_t _tcr_dc_not_assert;
 #else
     uint8_t _cspinmask;
     volatile uint8_t *_csport;
 #endif
+	uint16_t old_x0=-1, old_x1, old_y0=-1, old_y1;
 	void setAddr(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 	  __attribute__((always_inline)) {
-		writecommand_cont(ILI9341_CASET); // Column addr set
-		writedata16_cont(x0);   // XSTART
-		writedata16_cont(x1);   // XEND
-		writecommand_cont(ILI9341_PASET); // Row addr set
-		writedata16_cont(y0);   // YSTART
-		writedata16_cont(y1);   // YEND
+		if (x0 != old_x0 || x1 != old_x1) {
+			writecommand_cont(ILI9341_CASET); // Column addr set
+			writedata16_cont(x0);   // XSTART
+			writedata16_cont(x1);   // XEND
+			old_x0 = x0; old_x1 = x1;
+		}
+		if (y0 != old_y0 || y1 != old_y1) {
+			writecommand_cont(ILI9341_PASET); // Row addr set
+			writedata16_cont(y0);   // YSTART
+			writedata16_cont(y1);   // YEND
+			old_y0 = y0; old_y1 = y1;
+		}
 	}
 
 //----------------------------------------------------------------------
@@ -449,7 +460,7 @@ class ILI9341_t3 : public Print
 				waitTransmitComplete();
 				if (requested_tcr_state & LPSPI_TCR_PCS(3)) DIRECT_WRITE_HIGH(_dcport, _dcpinmask);
 				else DIRECT_WRITE_LOW(_dcport, _dcpinmask);
-				IMXRT_LPSPI4_S.TCR = _spi_tcr_current & ~(LPSPI_TCR_PCS(3) | LPSPI_TCR_CONT);	// go ahead and update TCR anyway?  
+				IMXRT_LPSPI4_S.TCR = _spi_tcr_current & ~(LPSPI_TCR_PCS(3) | LPSPI_TCR_CONT);	// go ahead and update TCR anyway?
 
 			}
 		}
@@ -457,6 +468,7 @@ class ILI9341_t3 : public Print
 
 	void beginSPITransaction(uint32_t clock = ILI9341_SPICLOCK) __attribute__((always_inline)) {
 		SPI.beginTransaction(SPISettings(clock, MSBFIRST, SPI_MODE0));
+		if (!_dcport) _spi_tcr_current = IMXRT_LPSPI4_S.TCR; 	// Only if DC is on hardware CS
 		if (_csport)
 			DIRECT_WRITE_LOW(_csport, _cspinmask);
 	}
@@ -468,39 +480,39 @@ class ILI9341_t3 : public Print
 
 	// BUGBUG:: currently assumming we only have CS_0 as valid CS
 	void writecommand_cont(uint8_t c) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7) /*| LPSPI_TCR_CONT*/);
+		maybeUpdateTCR(_tcr_dc_assert | LPSPI_TCR_FRAMESZ(7) /*| LPSPI_TCR_CONT*/);
 		IMXRT_LPSPI4_S.TDR = c;
 		_pending_rx_count++;	//
 		waitFifoNotFull();
 	}
 	void writedata8_cont(uint8_t c) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
+		maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
 		IMXRT_LPSPI4_S.TDR = c;
 		_pending_rx_count++;	//
 		waitFifoNotFull();
 	}
 	void writedata16_cont(uint16_t d) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(15) | LPSPI_TCR_CONT);
+		maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(15) | LPSPI_TCR_CONT);
 		IMXRT_LPSPI4_S.TDR = d;
 		_pending_rx_count++;	//
 		waitFifoNotFull();
 	}
 	void writecommand_last(uint8_t c) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7));
+		maybeUpdateTCR(_tcr_dc_assert | LPSPI_TCR_FRAMESZ(7));
 		IMXRT_LPSPI4_S.TDR = c;
 //		IMXRT_LPSPI4_S.SR = LPSPI_SR_WCF | LPSPI_SR_FCF | LPSPI_SR_TCF;
 		_pending_rx_count++;	//
 		waitTransmitComplete();
 	}
 	void writedata8_last(uint8_t c) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7));
+		maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(7));
 		IMXRT_LPSPI4_S.TDR = c;
 //		IMXRT_LPSPI4_S.SR = LPSPI_SR_WCF | LPSPI_SR_FCF | LPSPI_SR_TCF;
 		_pending_rx_count++;	//
 		waitTransmitComplete();
 	}
 	void writedata16_last(uint16_t d) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(15));
+		maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(15));
 		IMXRT_LPSPI4_S.TDR = d;
 //		IMXRT_LPSPI4_S.SR = LPSPI_SR_WCF | LPSPI_SR_FCF | LPSPI_SR_TCF;
 		_pending_rx_count++;	//
@@ -508,7 +520,7 @@ class ILI9341_t3 : public Print
 	}
 
 #else
-// T3.x	
+// T3.x
 	//void waitFifoNotFull(void) __attribute__((always_inline)) {
 	void waitFifoNotFull(void) {
 		uint32_t sr;
@@ -629,7 +641,7 @@ class ILI9341_t3 : public Print
 		writecommand_cont(ILI9341_RAMWR);
 		write16BitColor(color);
 	}
-	
+
 	void drawFontBits(bool opaque, uint32_t bits, uint32_t numbits, int32_t x, int32_t y, uint32_t repeat);
 };
 
