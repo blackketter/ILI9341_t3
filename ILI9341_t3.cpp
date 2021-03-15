@@ -1891,6 +1891,9 @@ boolean ILI9341_t3::getTextWrap()
 
 
 void ILI9341_t3::drawText(const char* text) {
+  if (text == nullptr || text[0] = 0) {
+    return;
+  }
   int16_t orig_x = cursor_x;
 
   const char* currentchar = text;
